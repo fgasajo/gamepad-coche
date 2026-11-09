@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>Gamepad BLE · Coche ESP32</title>
+<style>
+:root{--bg:#f7f6f2;--surface:#fbfbf9;--offset:#edeae5;--border:#d4d1ca;--text:#28251d;--muted:#5c5b56;--accent:#01696f;--accent-t:#fff;--ok:#437a22;--err:#a13544}
+@media (prefers-color-scheme:dark){:root{--bg:#171614;--surface:#1c1b19;--offset:#22211f;--border:#393836;--text:#cdccca;--muted:#9a9996;--accent:#4f98a3;--accent-t:#10100f;--ok:#6daa45;--err:#dd6974}}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+body{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;background:var(--bg);color:var(--text);min-height:100dvh;padding:16px;display:flex;justify-content:center}
+main{width:100%;max-width:760px;display:grid;gap:16px}
+header{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+h1{font-size:1.25rem}
+.group{display:inline-block;margin-top:4px;padding:2px 10px;border-radius:999px;background:var(--accent);color:var(--accent-t);font-size:.875rem;font-weight:600}
+.status{font-size:.875rem;color:var(--muted);display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.dot{width:10px;height:10px;border-radius:50%;background:var(--err)}
+.dot.on{background:var(--ok)}
+button{font:inherit;color:inherit;cursor:pointer;border:1px solid var(--border);background:var(--surface);border-radius:8px;padding:10px 14px;touch-action:manipulation;user-select:none}
+button:active{background:var(--offset)}
+button.primary{background:var(--accent);color:var(--accent-t);border-color:var(--accent);font-weight:600}
+button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.panel{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px}
+.panel h2{font-size:.875rem;font-weight:600;color:var(--muted);margin-bottom:12px;text-transform:uppercase;letter-spacing:.04em}
+.pad{display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:center}
+@media (max-width:560px){.pad{grid-template-columns:1fr}}
+.joy-wrap{display:flex;flex-direction:column;align-items:center;gap:8px}
+#joy{width:200px;height:200px;border-radius:50%;background:var(--offset);border:1px solid var(--border);position:relative;touch-action:none}
+#knob{width:76px;height:76px;border-radius:50%;background:var(--accent);position:absolute;left:62px;top:62px;transition:transform .12s}
+#knob.drag{transition:none}
+#dir{font-variant-numeric:tabular-nums;color:var(--muted);font-size:.875rem;min-height:1.2em}
+.dpad{display:grid;grid-template-columns:repeat(3,64px);grid-template-rows:repeat(3,64px);gap:8px;justify-content:center}
+.dpad button{font-size:1.25rem;padding:0}
+.speed{display:flex;align-items:center;gap:12px}
+.speed input{flex:1;accent-color:var(--accent)}
+.actions{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:8px}
+.actions button{display:flex;flex-direction:column;gap:2px;align-items:center;padding:12px 8px}
+.actions .ch{font-size:1.25rem;font-weight:700}
+.actions small{color:var(--muted);font-size:.75rem}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+input[type=text]{font:inherit;color:inherit;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:10px;min-width:0}
+input.cfg{width:44px;text-align:center;text-transform:uppercase}
+.cfgrow{display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:.875rem;color:var(--muted)}
+.opt{display:flex;flex-direction:column;gap:10px;font-size:.875rem}
+.opt label{display:flex;gap:8px;align-items:center}
+.opt input[type=checkbox]{accent-color:var(--accent);width:18px;height:18px}
+#log{font-family:ui-monospace,monospace;font-size:.8125rem;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:8px;height:110px;overflow:auto;white-space:pre-wrap}
+.note{font-size:.8125rem;color:var(--muted);line-height:1.5}
+</style>
+</head>
+<body>
+<main>
+<header>
+  <div>
+    <h1>Gamepad BLE · Coche ESP32</h1>
+    <span class="group" id="groupTag" hidden></span>
+  </div>
+  <div class="status"><span class="dot" id="dot"></span><span id="st">Desconectado</span>
+    <button class="primary" id="btnConn">Elegir coche</button></div>
+</header>
+
+<section class="panel">
+  <h2>Mi coche</h2>
+  <div class="opt">
+    <div class="row">
+      <label for="grp">Grupo</label>
+      <input type="text" id="grp" placeholder="Grupo 3" style="width:140px" maxlength="24">
+      <label for="carName">Nombre del coche</label>
+      <input type="text" id="carName" placeholder="COCHE-G3" style="width:160px" maxlength="24">
+    </div>
+    <p class="note">Escribe el nombre BLE que pusiste en el sketch (por ejemplo COCHE-G3) para ver solo tu coche en la lista. Si no aparece, deja el nombre vacío: se mostrarán todos los coches cercanos.</p>
+    <label><input type="checkbox" id="optAll"> Avanzado: mostrar todos los dispositivos Bluetooth (sin filtrar)</label>
+  </div>
+</section>
+
+<section class="panel">
+  <h2>Conducción</h2>
+  <div class="pad">
+    <div class="joy-wrap">
+      <div id="joy" aria-label="Joystick virtual"><div id="knob"></div></div>
+      <div id="dir">Centro</div>
+    </div>
+    <div>
+      <div class="dpad" aria-label="Cruceta">
+        <button data-c="G" aria-label="Adelante izquierda">↖</button>
+        <button data-c="F" aria-label="Adelante">↑</button>
+        <button data-c="I" aria-label="Adelante derecha">↗</button>
+        <button data-c="L" aria-label="Izquierda">←</button>
+        <button data-c="S" aria-label="Parar">■</button>
+        <button data-c="R" aria-label="Derecha">→</button>
+        <button data-c="H" aria-label="Atrás izquierda">↙</button>
+        <button data-c="B" aria-label="Atrás">↓</button>
+        <button data-c="J" aria-label="Atrás derecha">↘</button>
+      </div>
+    </div>
+  </div>
+  <div class="speed" style="margin-top:16px">
+    <label for="spd">Velocidad</label>
+    <input type="range" id="spd" min="0" max="10" value="10">
+    <output id="spdv">100%</output>
+  </div>
+</section>
+
+<section class="panel">
+  <h2>Botones de acción</h2>
+  <div class="actions" id="actions"></div>
+  <div class="cfgrow" style="margin-top:12px">Letra de cada botón:<span id="cfg" class="row"></span>
+    <button id="btnReset">Restaurar</button></div>
+</section>
+
+<section class="panel">
+  <h2>Enviar texto</h2>
+  <form class="row" id="txtForm">
+    <input type="text" id="txt" placeholder="Carácter u orden…" style="flex:1" autocomplete="off">
+    <button class="primary" type="submit">Enviar</button>
+  </form>
+  <div id="log" style="margin-top:12px" aria-live="polite"></div>
+  <p class="note" style="margin-top:8px">Teclado: WASD o flechas para mover, espacio para parar. Requiere Chrome o Edge con Bluetooth activado.</p>
+</section>
+</main>
+
+<script>
+// ===== Configuración BLE (deben coincidir con el sketch del coche) =====
+const SERVICE_UUID   = '4fafc201-1fb5-459e-8fcc-c5c9c331914b';
+const TEXT_CHAR_UUID = '1c95d5e3-d8f7-413a-bf3d-7a2e5d7be87e';
+const REPEAT_MS      = 120;
+
+const DEFAULT_ACTIONS = [
+  {ch:'X', label:'Luces'}, {ch:'Y', label:'Claxon'}, {ch:'V', label:'Turbo'},
+  {ch:'W', label:'Aux 1'}, {ch:'U', label:'Aux 2'}
+];
+let actions = DEFAULT_ACTIONS.map(a => ({...a}));
+const store = {
+  get(k){ try{ return localStorage.getItem(k); }catch(e){ return null; } },
+  set(k,v){ try{ localStorage.setItem(k,v); }catch(e){} }
+};
+try { const s = JSON.parse(store.get('gp-actions')); if (Array.isArray(s) && s.length === 5) actions = s; } catch(e){}
+
+let device=null, charac=null, current='S', timer=null;
+const $ = id => document.getElementById(id);
+const enc = new TextEncoder();
+
+function log(m){ const l=$('log'); l.textContent += m + '\n'; l.scrollTop = l.scrollHeight; }
+function isConn(){ return !!(device && device.gatt && device.gatt.connected); }
+function setStatus(on, txt){
+  $('dot').classList.toggle('on', on); $('st').textContent = txt;
+  $('btnConn').textContent = on ? 'Desconectar' : 'Elegir coche';
+}
+
+// ===== Grupo y nombre del coche: valores desde la URL (?grupo=Grupo 3&coche=COCHE-G3) =====
+const qs = new URLSearchParams(location.search);
+$('grp').value     = qs.get('grupo') || store.get('gp-grp') || '';
+$('carName').value = qs.get('coche') || store.get('gp-car') || '';
+function showGroup(){
+  const g = $('grp').value.trim(), t = $('groupTag');
+  t.textContent = g; t.hidden = !g;
+}
+$('grp').addEventListener('input', () => { store.set('gp-grp', $('grp').value); showGroup(); });
+$('carName').addEventListener('input', () => store.set('gp-car', $('carName').value));
+showGroup();
+
+// ===== Opciones del selector =====
+function buildRequestOptions(){
+  // optionalServices es obligatorio para poder acceder al servicio tras conectar
+  if ($('optAll').checked) return {acceptAllDevices:true, optionalServices:[SERVICE_UUID]};
+  const filter = {services:[SERVICE_UUID]};
+  const name = $('carName').value.trim();
+  if (name) filter.namePrefix = name;      // combinado con el servicio: se cumplen ambos
+  return {filters:[filter], optionalServices:[SERVICE_UUID]};
+}
+
+async function connect(){
+  if (!navigator.bluetooth){ log('Este navegador no soporta Web Bluetooth. Usa Chrome o Edge.'); return; }
+  try{
+    device = await navigator.bluetooth.requestDevice(buildRequestOptions());
+    device.addEventListener('gattserverdisconnected', onDisconnected);
+    setStatus(false, 'Conectando…');
+    const server = await device.gatt.connect();
+    let service;
+    try { service = await server.getPrimaryService(SERVICE_UUID); }
+    catch(e){ server.disconnect(); throw new Error('Ese dispositivo no tiene el servicio del coche. ¿Es el dispositivo correcto?'); }
+    charac = await service.getCharacteristic(TEXT_CHAR_UUID);
+    const label = (device.name || 'sin nombre');
+    setStatus(true, 'Conectado: ' + label);
+    log('Conectado: ' + label);
+  }catch(e){
+    setStatus(false, 'Desconectado');
+    log(e.name === 'NotFoundError' ? 'Selección cancelada o ningún coche encontrado. Si no ves el tuyo, deja vacío el nombre.' : 'Error: ' + e.message);
+  }
+}
+function onDisconnected(){ charac=null; stopRepeat(); setStatus(false,'Desconectado'); log('Conexión perdida'); }
+function disconnect(){ if (isConn()) device.gatt.disconnect(); }
+
+let busy = false;
+async function send(text){
+  if (!charac){ log('(sin conexión) ' + text); return; }
+  if (busy) return;
+  busy = true;
+  try{
+    const data = enc.encode(text);
+    if (charac.writeValueWithoutResponse) await charac.writeValueWithoutResponse(data);
+    else await charac.writeValue(data);
+  }catch(e){ log('Error al enviar: ' + e.message); }
+  busy = false;
+}
+
+// ===== Movimiento: se envía al cambiar y se repite mientras se mantiene =====
+function setDirection(c){
+  if (c === current && timer) return;
+  current = c;
+  send(c);
+  stopRepeat();
+  if (c !== 'S') timer = setInterval(() => send(current), REPEAT_MS);
+  $('dir').textContent = ({F:'Adelante',B:'Atrás',L:'Izquierda',R:'Derecha',G:'Adelante-izq',I:'Adelante-der',H:'Atrás-izq',J:'Atrás-der',S:'Centro'})[c];
+}
+function stopRepeat(){ if (timer){ clearInterval(timer); timer=null; } }
+function release(){ stopRepeat(); current='S'; send('S'); $('dir').textContent='Centro'; }
+
+// ===== Joystick virtual (8 direcciones con zona muerta) =====
+const joy=$('joy'), knob=$('knob');
+const R_MAX = 62, DEAD = 0.3;
+function joyMove(e){
+  const r = joy.getBoundingClientRect();
+  let dx = e.clientX - (r.left + r.width/2), dy = e.clientY - (r.top + r.height/2);
+  const d = Math.hypot(dx, dy);
+  if (d > R_MAX){ dx *= R_MAX/d; dy *= R_MAX/d; }
+  knob.style.transform = `translate(${dx}px,${dy}px)`;
+  const nx = dx/R_MAX, ny = dy/R_MAX;
+  const up = ny < -DEAD, dn = ny > DEAD, lf = nx < -DEAD, rt = nx > DEAD;
+  let c = 'S';
+  if (up && lf) c='G'; else if (up && rt) c='I';
+  else if (dn && lf) c='H'; else if (dn && rt) c='J';
+  else if (up) c='F'; else if (dn) c='B'; else if (lf) c='L'; else if (rt) c='R';
+  setDirection(c);
+}
+joy.addEventListener('pointerdown', e => { joy.setPointerCapture(e.pointerId); knob.classList.add('drag'); joyMove(e); });
+joy.addEventListener('pointermove', e => { if (joy.hasPointerCapture(e.pointerId)) joyMove(e); });
+function joyEnd(){ knob.classList.remove('drag'); knob.style.transform=''; release(); }
+joy.addEventListener('pointerup', joyEnd);
+joy.addEventListener('pointercancel', joyEnd);
+
+// ===== Cruceta =====
+document.querySelectorAll('.dpad button').forEach(b => {
+  const c = b.dataset.c;
+  b.addEventListener('pointerdown', e => { b.setPointerCapture(e.pointerId); c==='S' ? release() : setDirection(c); });
+  b.addEventListener('pointerup', () => { if (c!=='S') release(); });
+  b.addEventListener('pointercancel', () => { if (c!=='S') release(); });
+});
+
+// ===== Velocidad: '0'..'9' y 'q' (100%) =====
+$('spd').addEventListener('input', e => {
+  const v = +e.target.value;
+  $('spdv').textContent = v*10 + '%';
+  send(v === 10 ? 'q' : String(v));
+});
+
+// ===== Botones de acción personalizables =====
+function renderActions(){
+  const box=$('actions'), cfg=$('cfg'); box.innerHTML=''; cfg.innerHTML='';
+  actions.forEach((a,i) => {
+    const b=document.createElement('button');
+    b.innerHTML = `<span class="ch">${a.ch}</span><small>${a.label}</small>`;
+    b.addEventListener('click', () => send(actions[i].ch));
+    box.appendChild(b);
+    const inp=document.createElement('input');
+    inp.className='cfg'; inp.type='text'; inp.maxLength=1; inp.value=a.ch; inp.setAttribute('aria-label','Letra botón '+(i+1));
+    inp.addEventListener('change', () => {
+      const v = inp.value.trim().slice(0,1); if (!v){ inp.value=actions[i].ch; return; }
+      actions[i].ch = v; store.set('gp-actions', JSON.stringify(actions)); renderActions();
+    });
+    cfg.appendChild(inp);
+  });
+}
+$('btnReset').addEventListener('click', () => { actions = DEFAULT_ACTIONS.map(a=>({...a})); store.set('gp-actions', JSON.stringify(actions)); renderActions(); });
+
+// ===== Texto libre =====
+$('txtForm').addEventListener('submit', e => {
+  e.preventDefault(); const t=$('txt').value; if (!t) return;
+  send(t); log('> ' + t); $('txt').value='';
+});
+
+// ===== Teclado =====
+const keymap = {w:'F',arrowup:'F',s:'B',arrowdown:'B',a:'L',arrowleft:'L',d:'R',arrowright:'R'};
+const held = new Set();
+function kbUpdate(){
+  const up=held.has('F'), dn=held.has('B'), lf=held.has('L'), rt=held.has('R');
+  let c='S';
+  if (up&&lf) c='G'; else if (up&&rt) c='I'; else if (dn&&lf) c='H'; else if (dn&&rt) c='J';
+  else if (up) c='F'; else if (dn) c='B'; else if (lf) c='L'; else if (rt) c='R';
+  c==='S' ? release() : setDirection(c);
+}
+addEventListener('keydown', e => {
+  if (e.target.tagName==='INPUT') return;
+  const k=e.key.toLowerCase();
+  if (k===' '){ held.clear(); release(); e.preventDefault(); return; }
+  if (keymap[k] && !held.has(keymap[k])){ held.add(keymap[k]); kbUpdate(); e.preventDefault(); }
+});
+addEventListener('keyup', e => {
+  const k=e.key.toLowerCase();
+  if (keymap[k]){ held.delete(keymap[k]); kbUpdate(); }
+});
+
+document.addEventListener('visibilitychange', () => { if (document.hidden) release(); });
+
+$('btnConn').addEventListener('click', () => isConn() ? disconnect() : connect());
+renderActions();
+</script>
+</body>
+</html>
